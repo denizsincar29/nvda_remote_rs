@@ -1,0 +1,14 @@
+[package]
+name = "nvdaremote"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+hex = "0.4.3"
+# lets remove each dependency one by one to see which one is not needed
+rustls = "0.23.13"
+serde = { version = "1.0.210", features = ["derive"] }
+serde_json = "1.0.128"
+thiserror = "1.0.64"
+tokio = { version = "1.40.0", features = ["full"] }
+tokio-rustls = "0.26.0"
