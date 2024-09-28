@@ -1,6 +1,4 @@
-mod fingerprint;  // Import the fingerprint module
-
-use rustls::RootCertStore;
+use rustls::{client::danger::{DangerousClientConfigBuilder, ServerCertVerifier}, ConfigBuilder, RootCertStore};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::TcpStream,
@@ -8,7 +6,49 @@ use tokio::{
 use serde_json::json;
 use std::collections::HashSet;
 use thiserror::Error;
-use fingerprint::FingerprintCache;
+
+#[derive(Debug)]
+struct NoCertificateVerification;
+
+impl ServerCertVerifier for NoCertificateVerification {
+    fn verify_server_cert(
+            &self,
+            end_entity: &rustls::pki_types::CertificateDer<'_>,
+            intermediates: &[rustls::pki_types::CertificateDer<'_>],
+            server_name: &rustls::pki_types::ServerName<'_>,
+            ocsp_response: &[u8],
+            now: rustls::pki_types::UnixTime,
+        ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+            Ok(rustls::client::danger::ServerCertVerified::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        vec![]
+    }
+
+    fn verify_tls12_signature(
+            &self,
+            message: &[u8],
+            cert: &rustls::pki_types::CertificateDer<'_>,
+            dss: &rustls::DigitallySignedStruct,
+        ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+            Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    
+        
+    }
+
+    fn verify_tls13_signature(
+            &self,
+            message: &[u8],
+            cert: &rustls::pki_types::CertificateDer<'_>,
+            dss: &rustls::DigitallySignedStruct,
+        ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+            Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+}
+
+
+
 
 #[derive(Error, Debug)]
 pub enum NVDARemoteError {
@@ -18,8 +58,6 @@ pub enum NVDARemoteError {
     TlsError(#[from] tokio_rustls::rustls::Error),
     #[error("JSON error: {0}")]
     JsonError(#[from] serde_json::Error),
-    #[error("Certificate saving error")]
-    CertificateSavingError,
 }
 
 #[derive(Debug, Clone)]
@@ -55,7 +93,6 @@ pub struct NVDARemote {
     pub channel: String,
     pub connection_type: String,
     soc: tokio_rustls::client::TlsStream<TcpStream>,
-    certificate: Option<Vec<u8>>,
     pressed_keys: HashSet<(i32, i32, bool)>,
     uid: i32,
     event_callback: Option<Box<dyn Fn(EventType) + Send>>,
@@ -67,55 +104,22 @@ impl NVDARemote {
         key: &str,
         connection_type: ConnectionType,
         port: u16,
-        fingerprint_cache_path: &str
     ) -> Result<Self, NVDARemoteError> {
         let addr = format!("{}:{}", host, port);
         let stream = TcpStream::connect(addr).await?;
-    
-        // Load the fingerprint cache
-        let mut cache = FingerprintCache::load_from_file(fingerprint_cache_path).await?;
-    
-        // Create the TLS connector
-        let root_store = cache.to_cert_store();
 
-        let config = std::sync::Arc::new(
-            tokio_rustls::rustls::ClientConfig::builder()
-                .with_root_certificates(root_store)
-                .with_no_client_auth(),
+        // Create the TLS connector, bypassing certificate validation
+        let config = std::sync::Arc::new(rustls::ClientConfig::builder().dangerous().with_custom_certificate_verifier(std::sync::Arc::new(NoCertificateVerification)).with_no_client_auth()
         );
         let tls_connector = tokio_rustls::TlsConnector::from(config);
         let domain = rustls::pki_types::ServerName::try_from(host.to_string()).unwrap();
-        let soc = tls_connector.connect(domain, stream).await?;
-    
-        // Get the server's certificate (fingerprint)
-        let cert = soc.get_ref().1.peer_certificates().unwrap();
-        if let Some(server_cert) = cert.get(0) {
-            let fingerprint = server_cert.to_vec();
-            let fingerprint_hex = hex::encode(fingerprint.clone());
-            // Check if the fingerprint for this host is in the cache
-            if !cache.contains(host) {
-                // If not, return an error along with the fingerprint
-                return Err(NVDARemoteError::TlsError(tokio_rustls::rustls::Error::General(
-                    format!("Server fingerprint not trusted for host {}: {}", host, fingerprint_hex),
-                )));
-            }
+        let soc = tls_connector.connect(domain, stream).await?;  // Here is the error!
 
-            // Compare fingerprints if needed
-            if let Some(cached_fingerprint) = cache.get_fingerprint(host) {
-                if cached_fingerprint != fingerprint {
-                    return Err(NVDARemoteError::TlsError(tokio_rustls::rustls::Error::General(
-                        format!("Fingerprint mismatch for host {}.", host),
-                    )));
-                }
-            }
-        }
-    
         Ok(Self {
             host: host.to_string(),
             port,
             channel: key.to_string(),
             connection_type: connection_type.to_string(),
-            certificate: Some((cert[0].clone()).to_vec()),
             soc,
             pressed_keys: HashSet::new(),
             uid: 0,
@@ -182,3 +186,7 @@ impl NVDARemote {
         self.event_callback = Some(Box::new(callback));
     }
 }
+
+// This struct implements a dummy verifier that disables certificate validation.
+
+
