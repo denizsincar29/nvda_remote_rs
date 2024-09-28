@@ -1,4 +1,4 @@
-use nvdaremote::{ConnectionType, NVDARemote, NVDARemoteError};
+use nvda_remote::{ConnectionType, NVDARemote, NVDARemoteError};
 
 #[tokio::main]
 async fn main() -> Result<(), NVDARemoteError> {

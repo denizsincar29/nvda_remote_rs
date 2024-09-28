@@ -1,11 +1,10 @@
 [package]
-name = "nvdaremote"
+name = "nvda_remote"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 hex = "0.4.3"
-# lets remove each dependency one by one to see which one is not needed
 rustls = "0.23.13"
 serde = { version = "1.0.210", features = ["derive"] }
 serde_json = "1.0.128"
